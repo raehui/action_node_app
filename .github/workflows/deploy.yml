@@ -1,0 +1,68 @@
+
+# xxx.yml 파일의 이름과 갯수는 마음대로 정할 수 있다.
+
+# 이 파일에 명시한 동작대로 github 에서 동작을 한다.
+name: Deploy Node.js app to EC2
+
+# 언제 이 파일에 정의된 동작을 실행할지 실행시점을 지정한다.
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      # github 에서 사용할 개인키(EC2_KEY) 를 등록
+      - name: Add SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+        shell: bash
+
+      - name: Clean target directory in EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ec2-user@3.21.195.237 "
+            mkdir -p /home/ec2-user/node_app && \
+            find /home/ec2-user/node_app -mindepth 1 -delete
+          "
+
+      - name: Copy source code to EC2 via SCP
+        run: |
+          scp -o StrictHostKeyChecking=no -r ./ ec2-user@3.21.195.237:/home/ec2-user/node_app/
+
+      - name: Remote install & restart with PM2
+        run: |
+          ssh -tt -o StrictHostKeyChecking=no ec2-user@3.21.195.237 << 'EOF'
+            cd /home/ec2-user/node_app
+
+            # 1. 의존성 설치
+            npm install
+
+            # 2. PM2 설치 (최초 1회만 필요)
+            command -v pm2 || npm install -g pm2
+
+            # 3. 기존 앱 종료 후 재시작
+            pm2 delete node_app || true
+            pm2 start app.js --name node_app
+
+            # 4. 재부팅 자동 실행 등록
+            pm2 save
+
+            # 5. 상태 확인
+            pm2 list
+            echo "배포 완료"
+            exit 0
+          EOF
+        shell: bash

@@ -1,1 +1,3 @@
 node_modules
+# 개인키는 절대로 github 에 올라가면 안됨
+github-actions-key
